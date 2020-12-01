@@ -539,7 +539,16 @@ def predict_kitti_to_anno(net,
     batch_imgidx = example['image_idx']
 
     if use_coarse_to_fine:
+        
+        tt = time.perf_counter()
+
         predictions_dicts_coarse, predictions_dicts_refine = net(example)
+
+        tt = time.perf_counter() - tt
+        fps = 1.0 / tt
+
+        print('fps:', fps, end='\t')
+
         # t = time.time()
         annos_coarse = comput_kitti_output(predictions_dicts_coarse, batch_image_shape,
                             lidar_input, center_limit_range, class_names,
@@ -549,7 +558,16 @@ def predict_kitti_to_anno(net,
                             global_set)
         return annos_coarse, annos_refine
     else:
+
+        tt = time.perf_counter()
+
         predictions_dicts_coarse = net(example)
+
+        tt = time.perf_counter() - tt
+        fps = 1.0 / tt
+
+        print('fps:', fps, end='\t')
+
         annos_coarse = comput_kitti_output(predictions_dicts_coarse, batch_image_shape,
                             lidar_input, center_limit_range, class_names,
                             global_set)
@@ -693,6 +711,9 @@ def evaluate(config_path,
     result_path_step.mkdir(parents=True, exist_ok=True)
     t = time.time()
 
+    total_time = 0
+    total_count = 0
+
     if  model_cfg.rpn.module_class_name == "PSA" or model_cfg.rpn.module_class_name == "RefineDet":
         dt_annos_coarse = []
         dt_annos_refine = []
@@ -701,6 +722,9 @@ def evaluate(config_path,
         bar.start(len(eval_dataset) // input_cfg.batch_size + 1)
         for example in iter(eval_dataloader):
             example = example_convert_to_torch(example, float_dtype)
+
+            tt = time.perf_counter()
+
             if pickle_result:
                 coarse, refine = predict_kitti_to_anno(
                     net, example, class_names, center_limit_range,
@@ -710,7 +734,12 @@ def evaluate(config_path,
             else:
                 _predict_kitti_to_file(net, example, result_path_step, class_names,
                                        center_limit_range, model_cfg.lidar_input,use_coarse_to_fine = True)
+
+            tt = time.perf_counter() - tt
+            total_time += tt
+            total_count += 1
             bar.print_bar()
+            
     else:
         dt_annos = []
         print("Generate output labels...")
@@ -718,6 +747,9 @@ def evaluate(config_path,
         bar.start(len(eval_dataset) // input_cfg.batch_size + 1)
         for example in iter(eval_dataloader):
             example = example_convert_to_torch(example, float_dtype)
+
+            tt = time.perf_counter()
+
             if pickle_result:
                 dt_annos += predict_kitti_to_anno(
                     net, example, class_names, center_limit_range,
@@ -725,9 +757,19 @@ def evaluate(config_path,
             else:
                 _predict_kitti_to_file(net, example, result_path_step, class_names,
                                        center_limit_range, model_cfg.lidar_input, use_coarse_to_fine = False)
+
+            tt = time.perf_counter() - tt
+            total_time += tt
+            total_count += 1
             bar.print_bar()
 
     sec_per_example = len(eval_dataset) / (time.time() - t)
+    print()
+    print('fps by total:', total_count / total_time)
+
+    print("net._total_inference_count:", net._total_inference_count)
+    print("total_count:", total_count)
+    
     print(f'generate label finished({sec_per_example:.2f}/s). start eval:')
 
     print(f"avg forward time per example: {net.avg_forward_time:.3f}")

@@ -106,3 +106,12 @@ venv.bak/
 .mypy_cache/
 
 .vscode
+
+*.pkl
+*.tckpt
+**/events.*
+pipeline.config
+log.txt
+checkpoints.json
+*.zip
+*.swp	
