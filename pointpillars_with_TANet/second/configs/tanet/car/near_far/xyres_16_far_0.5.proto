@@ -77,7 +77,7 @@ model: {
          anchor_generator_stride: {
            sizes: [1.6, 3.9, 1.56] # wlh
            strides: [0.32, 0.32, 0.0] # if generate only 1 z_center, z_stride will be ignored
-           offsets: [0.16, -39.52, -1.78] # origin_offset + strides / 2
+           offsets: [34.72, -39.52, -1.78] # origin_offset + strides / 2
            rotations: [0, 1.57] # 0, pi/2
            matched_threshold : 0.6
            unmatched_threshold : 0.45
