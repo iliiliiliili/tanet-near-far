@@ -25,7 +25,9 @@ from second.pytorch.builder import (
 )
 from second.utils.eval import get_coco_eval_result, get_official_eval_result
 from second.utils.progress_bar import ProgressBar
-
+from metrics import AverageMetric, Metric, RangeMetric
+from second.core import box_np_ops
+from pytorch.core import box_torch_ops
 
 def _get_pos_neg_loss(cls_loss, labels):
     # cls_loss: [N, num_anchors, num_class]
@@ -666,6 +668,7 @@ def predict_kitti_to_anno(
     lidar_input=False,
     use_coarse_to_fine=True,
     global_set=None,
+    fps_metric=None,
 ):
     batch_image_shape = example["image_shape"]
     batch_imgidx = example["image_idx"]
@@ -680,6 +683,8 @@ def predict_kitti_to_anno(
         fps = 1.0 / tt
 
         print("fps:", fps, end="\t")
+        if fps_metric is not None:
+            fps_metric.update(fps)
 
         # t = time.time()
         annos_coarse = comput_kitti_output(
@@ -709,6 +714,8 @@ def predict_kitti_to_anno(
         fps = 1.0 / tt
 
         print("fps:", fps, end="\t")
+        if fps_metric is not None:
+            fps_metric.update(fps)
 
         annos_coarse = comput_kitti_output(
             predictions_dicts_coarse,
@@ -801,6 +808,8 @@ def evaluate(
     ckpt_path=None,
     ref_detfile=None,
     pickle_result=True,
+    evaluation_mode="1/2",  # 1/2: take all ground truth boxes, 1/1: take only gt boxes inside voxel range
+    metrics_file_name="eval-metrics.txt",
 ):
     model_dir = pathlib.Path(model_dir)
     if predict_test:
@@ -870,8 +879,118 @@ def evaluate(
     result_path_step.mkdir(parents=True, exist_ok=True)
     t = time.time()
 
+    fps_metric = AverageMetric()
     total_time = 0
     total_count = 0
+
+    total_metrics = {}
+
+    empty_coarse = [
+        {
+            "name": np.array([], dtype=np.float64),
+            "truncated": np.array([], dtype=np.float64),
+            "occluded": np.array([], dtype=np.float64),
+            "alpha": np.array([], dtype=np.float64),
+            "bbox": np.zeros((0, 4), dtype=np.float64),
+            "dimensions": np.zeros(shape=(0, 3), dtype=np.float64),
+            "location": np.zeros(shape=(0, 3), dtype=np.float64),
+            "rotation_y": np.array([], dtype=np.float64),
+            "score": np.array([], dtype=np.float64),
+            "image_idx": np.array([], dtype=np.int64),
+        }
+    ]
+    empty_refine = empty_coarse
+
+    if evaluation_mode == "1/2":
+        gt_annos = [
+            info["annos"] for info in eval_dataset.dataset.kitti_infos
+        ]
+    elif evaluation_mode == "1/1":
+
+        ogt_annos = [
+            info["annos"] for info in eval_dataset.dataset.kitti_infos
+        ]
+
+        gt_annos = []
+        ev_limit_range = np.array(center_limit_range)
+        in_range_count = 0
+        not_in_range_count = 0
+
+        for info in eval_dataset.dataset.kitti_infos:
+            rect = info["calib/R0_rect"]
+            Trv2c = info["calib/Tr_velo_to_cam"]
+            annos = info["annos"]
+
+            filtered_annos = {}
+            keys = annos.keys()
+
+            for key in keys:
+                filtered_annos[key] = []
+
+            for i in range(len(annos["location"])):
+                loc = annos["location"][i]
+                lidar_loc = box_np_ops.camera_to_lidar(loc, rect, Trv2c)
+                is_in_range = not (
+                    np.any(lidar_loc < ev_limit_range[:3])
+                    or np.any(lidar_loc > ev_limit_range[3:])
+                )
+
+                if is_in_range or np.all(loc == -1000):
+                    in_range_count += 0 if np.all(loc == -1000) else 1
+                    for key in keys:
+                        filtered_annos[key].append(annos[key][i])
+                else:
+                    not_in_range_count += 1
+
+            for key in keys:
+
+                if len(filtered_annos[key]) == 0:
+                    filtered_annos[key] = np.ones(
+                        {
+                            "name": [0],
+                            "truncated": [0],
+                            "occluded": [0],
+                            "alpha": [0],
+                            "bbox": [0, 4],
+                            "dimensions": [0, 3],
+                            "location": [0, 3],
+                            "rotation_y": [0],
+                            "score": [0],
+                            "index": [0],
+                            "group_ids": [0],
+                            "difficulty": [0],
+                            "num_points_in_gt": [0],
+                        }[key],
+                        dtype={
+                            "name": np.float64,
+                            "truncated": np.float64,
+                            "occluded": np.float64,
+                            "alpha": np.float64,
+                            "bbox": np.float64,
+                            "dimensions": np.float64,
+                            "location": np.float64,
+                            "rotation_y": np.float64,
+                            "score": np.float64,
+                            "index": np.int32,
+                            "group_ids": np.int32,
+                            "difficulty": np.int32,
+                            "num_points_in_gt": np.int32,
+                        }[key],
+                    )
+                else:
+                    filtered_annos[key] = np.array(filtered_annos[key])
+
+            gt_annos.append(filtered_annos)
+
+        print(
+            "in_range_count:",
+            in_range_count,
+            "not_in_range_count:",
+            not_in_range_count,
+        )
+
+        total_metrics["Objects in range"] = Metric(in_range_count)
+        total_metrics["Objects not in range"] = Metric(not_in_range_count)
 
     if (
         model_cfg.rpn.module_class_name == "PSA"
@@ -885,6 +1004,12 @@ def evaluate(
         for example in iter(eval_dataloader):
             example = example_convert_to_torch(example, float_dtype)
 
+            if len(example["voxels"]) < 4:
+                print("#", end="\n")
+                dt_annos_coarse += empty_coarse
+                dt_annos_refine += empty_refine
+                continue
+
             tt = time.perf_counter()
 
             if pickle_result:
@@ -896,6 +1021,7 @@ def evaluate(
                     model_cfg.lidar_input,
                     use_coarse_to_fine=True,
                     global_set=None,
+                    fps_metric=fps_metric,
                 )
                 dt_annos_coarse += coarse
                 dt_annos_refine += refine
@@ -908,12 +1034,24 @@ def evaluate(
                     center_limit_range,
                     model_cfg.lidar_input,
                     use_coarse_to_fine=True,
+                    fps_metric=fps_metric,
                 )
 
             tt = time.perf_counter() - tt
             total_time += tt
             total_count += 1
             bar.print_bar()
+
+        total_detected_coarse = sum(
+            [len(a["alpha"]) for a in dt_annos_coarse]
+        )
+        total_detected_refine = sum(
+            [len(a["alpha"]) for a in dt_annos_refine]
+        )
+
+        print()
+        print(" || total_detected_coarse:", total_detected_coarse)
+        print(" || total_detected_refine:", total_detected_refine)
 
     else:
         dt_annos = []
@@ -963,9 +1101,14 @@ def evaluate(
     print(f"avg forward time per example: {net.avg_forward_time:.3f}")
     print(f"avg postprocess time per example: {net.avg_postprocess_time:.3f}")
     if not predict_test:
-        gt_annos = [
-            info["annos"] for info in eval_dataset.dataset.kitti_infos
-        ]
+        # gt_annos = [
+        #     info["annos"] for info in eval_dataset.dataset.kitti_infos
+        # ]
+
+        print(
+            " || total_objects_gt:", sum([len(a["alpha"]) for a in gt_annos])
+        )
+
         if not pickle_result:
             dt_annos = kitti.get_label_annos(result_path_step)
 
@@ -974,33 +1117,117 @@ def evaluate(
             or model_cfg.rpn.module_class_name == "RefineDet"
         ):
             print("Before Refine:")
-            result_coarse = get_official_eval_result(
-                gt_annos, dt_annos_coarse, class_names
+            (
+                result_coarse,
+                mAPbbox_coarse,
+                mAPbev_coarse,
+                mAP3d_coarse,
+                mAPaos_coarse,
+            ) = get_official_eval_result(
+                gt_annos, dt_annos_coarse, class_names, return_data=True,
             )
             print(result_coarse)
 
             print("After Refine:")
-            result_refine = get_official_eval_result(
-                gt_annos, dt_annos_refine, class_names
+            (
+                result_refine,
+                mAPbbox_refine,
+                mAPbev_refine,
+                mAP3d_refine,
+                mAPaos_refine,
+            ) = get_official_eval_result(
+                gt_annos, dt_annos_refine, class_names, return_data=True,
             )
             print(result_refine)
-            result = get_coco_eval_result(
-                gt_annos, dt_annos_refine, class_names
+            # result = get_coco_eval_result(
+            #     gt_annos, dt_annos_refine, class_names
+            # )
+            # dt_annos = dt_annos_refine
+            # print(result)
+
+            coarse_3dAP_metrics = {}
+
+            for i, class_name in enumerate(class_names):
+                metric = Metric()
+                metric.update(
+                    [
+                        mAP3d_coarse[i, 0, 0],
+                        mAP3d_coarse[i, 1, 0],
+                        mAP3d_coarse[i, 2, 0],
+                    ]
+                )
+                coarse_3dAP_metrics[
+                    "Coarse " + class_name + " 3D APs"
+                ] = metric
+
+            refine_3dAP_metrics = {}
+
+            for i, class_name in enumerate(class_names):
+                metric = Metric()
+                metric.update(
+                    [
+                        mAP3d_refine[i, 0, 0],
+                        mAP3d_refine[i, 1, 0],
+                        mAP3d_refine[i, 2, 0],
+                    ]
+                )
+                coarse_3dAP_metrics[
+                    "Refine " + class_name + " 3D APs"
+                ] = metric
+
+            total_metrics = {
+                "FPS": fps_metric,
+                "Evaluation Mode": Metric(evaluation_mode),
+                **coarse_3dAP_metrics,
+                **refine_3dAP_metrics,
+                **total_metrics,
+            }
+
+            log_metrics(
+                model_dir / metrics_file_name, total_metrics,
             )
-            dt_annos = dt_annos_refine
-            print(result)
+            log_metrics(
+                "console", total_metrics,
+            )
+
         else:
-            result = get_official_eval_result(gt_annos, dt_annos, class_names)
+            result, mAPbbox, mAPbev, mAP3d, mAPaos = get_official_eval_result(
+                gt_annos, dt_annos, class_names, return_data=True
+            )
             print(result)
 
-        result = get_coco_eval_result(gt_annos, dt_annos, class_names)
-        print(result)
-        if pickle_result:
-            with open(result_path_step / "result.pkl", "wb") as f:
-                pickle.dump(dt_annos, f)
+            result_3dAP_metrics = {}
+
+            for i, class_name in enumerate(class_names):
+                metric = Metric()
+                metric.update(
+                    [mAP3d[i, 0, 0], mAP3d[i, 1, 0], mAP3d[i, 2, 0],]
+                )
+                result_3dAP_metrics[class_name + " 3D APs"] = metric
+
+            total_metrics = {
+                "FPS": fps_metric,
+                "Evaluation Mode": Metric(evaluation_mode),
+                **result_3dAP_metrics,
+                **total_metrics,
+            }
+
+            log_metrics(
+                model_dir / metrics_file_name, total_metrics,
+            )
+
+            log_metrics(
+                "console", total_metrics,
+            )
+
+        # result = get_coco_eval_result(gt_annos, dt_annos, class_names)
+        # print(result)
+        # if pickle_result:
+        #     with open(result_path_step / "result.pkl", "wb") as f:
+        #         pickle.dump(dt_annos, f)
 
 
-def log_metrics(path: str, metrics: Dict[str, Metric]):
+def log_metrics(path: str, metrics):
     for name, metric in metrics.items():
         metric.log(path, name + " | ")
 
