@@ -33,6 +33,10 @@ class AverageMetric(Metric):
         self.value = []
 
     def get(self):
+
+        if (len(self.value) <= 0):
+            return None
+
         return sum(self.value) / len(self.value)
 
     def update(self, value):

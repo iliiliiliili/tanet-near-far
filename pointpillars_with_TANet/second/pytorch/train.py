@@ -737,6 +737,7 @@ def _predict_kitti_to_file(
     center_limit_range=None,
     lidar_input=False,
     use_coarse_to_fine=True,
+    fps_metric=None,
 ):
     batch_image_shape = example["image_shape"]
     batch_imgidx = example["image_idx"]
@@ -810,6 +811,7 @@ def evaluate(
     pickle_result=True,
     evaluation_mode="1/2",  # 1/2: take all ground truth boxes, 1/1: take only gt boxes inside voxel range
     metrics_file_name="eval-metrics.txt",
+    gt_limit_range=None, # remove ground truth objects outside of this range
 ):
     model_dir = pathlib.Path(model_dir)
     if predict_test:
@@ -830,6 +832,12 @@ def evaluate(
     train_cfg = config.train_config
     class_names = list(input_cfg.class_names)
     center_limit_range = model_cfg.post_center_limit_range
+    
+    if gt_limit_range is None:
+        gt_limit_range = center_limit_range
+    else:
+        center_limit_range = gt_limit_range
+
     ######################
     # BUILD VOXEL GENERATOR
     ######################
@@ -912,7 +920,7 @@ def evaluate(
         ]
 
         gt_annos = []
-        ev_limit_range = np.array(center_limit_range)
+        ev_limit_range = np.array(gt_limit_range)
         in_range_count = 0
         not_in_range_count = 0
 
@@ -1072,6 +1080,7 @@ def evaluate(
                     model_cfg.lidar_input,
                     use_coarse_to_fine=False,
                     global_set=None,
+                    fps_metric=fps_metric,
                 )
             else:
                 _predict_kitti_to_file(
@@ -1082,6 +1091,7 @@ def evaluate(
                     center_limit_range,
                     model_cfg.lidar_input,
                     use_coarse_to_fine=False,
+                    fps_metric=fps_metric,
                 )
 
             tt = time.perf_counter() - tt

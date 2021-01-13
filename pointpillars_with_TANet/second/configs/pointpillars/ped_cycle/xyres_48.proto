@@ -1,8 +1,8 @@
 model: {
   second: {
     voxel_generator {
-      point_cloud_range : [0, -19.84, -2.5, 47.36, 19.84, 0.5]
-      voxel_size : [0.16, 0.16, 3]
+      point_cloud_range : [0, -21.12, -2.5, 49.92, 21.12, 0.5]
+      voxel_size : [0.48, 0.48, 3]
       max_number_of_points_per_voxel : 100
     }
     num_class: 2
@@ -55,7 +55,7 @@ model: {
 
     loss_norm_type: NormByNumPositives
     # Postprocess
-    post_center_limit_range: [0, -19.84, -2.5, 47.36, 19.84, 0.5]
+    post_center_limit_range: [0, -21.12, -2.5, 49.92, 21.12, 0.5]
     use_rotate_nms: false
     use_multi_class_nms: false
     nms_pre_max_size: 1000
@@ -76,8 +76,8 @@ model: {
       anchor_generators: {
         anchor_generator_stride: {
           sizes: [0.6, 1.76, 1.73] # wlh
-          strides: [0.16, 0.16, 0.0] # if generate only 1 z_center, z_stride will be ignored
-          offsets: [0.08, -19.76, -1.465] # origin_offset + strides / 2
+          strides: [0.48, 0.48, 0.0] # if generate only 1 z_center, z_stride will be ignored
+          offsets: [0.24, -20.88, -1.465] # origin_offset + strides / 2
           rotations: [0, 1.57] # 0, pi/2
           matched_threshold : 0.5
           unmatched_threshold : 0.35
@@ -86,8 +86,8 @@ model: {
       anchor_generators: {
         anchor_generator_stride: {
           sizes: [0.6, 0.8, 1.73] # wlh
-          strides: [0.16, 0.16, 0.0] # if generate only 1 z_center, z_stride will be ignored
-          offsets: [0.08, -19.76, -1.465] # origin_offset + strides / 2
+          strides: [0.48, 0.48, 0.0] # if generate only 1 z_center, z_stride will be ignored
+          offsets: [0.24, -20.88, -1.465] # origin_offset + strides / 2
           rotations: [0, 1.57] # 0, pi/2
           matched_threshold : 0.5
           unmatched_threshold : 0.35

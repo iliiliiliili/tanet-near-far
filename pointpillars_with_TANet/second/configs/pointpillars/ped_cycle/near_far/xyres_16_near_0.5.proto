@@ -1,7 +1,7 @@
 model: {
   second: {
     voxel_generator {
-      point_cloud_range : [0, -19.84, -2.5, 47.36, 19.84, 0.5]
+      point_cloud_range : [0, -19.84, -2.5, 24.32, 19.84, 0.5]
       voxel_size : [0.16, 0.16, 3]
       max_number_of_points_per_voxel : 100
     }
@@ -55,7 +55,7 @@ model: {
 
     loss_norm_type: NormByNumPositives
     # Postprocess
-    post_center_limit_range: [0, -19.84, -2.5, 47.36, 19.84, 0.5]
+    post_center_limit_range: [0, -19.84, -2.5, 24.32, 19.84, 0.5]
     use_rotate_nms: false
     use_multi_class_nms: false
     nms_pre_max_size: 1000
