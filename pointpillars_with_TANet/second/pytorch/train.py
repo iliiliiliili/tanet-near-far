@@ -25,9 +25,9 @@ from second.pytorch.builder import (
 )
 from second.utils.eval import get_coco_eval_result, get_official_eval_result
 from second.utils.progress_bar import ProgressBar
-from metrics import AverageMetric, Metric, RangeMetric
+from second.metrics import AverageMetric, Metric, RangeMetric
 from second.core import box_np_ops
-from pytorch.core import box_torch_ops
+from second.pytorch.core import box_torch_ops
 
 def _get_pos_neg_loss(cls_loss, labels):
     # cls_loss: [N, num_anchors, num_class]

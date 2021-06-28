@@ -22,7 +22,8 @@ from second.pytorch.models.pointpillars import PillarFeatureNet, PointPillarsSca
 from second.pytorch.models.tanet import PillarFeature_TANet, PSA
 from second.pytorch.models.loss_utils import create_refine_loss
 from second.pytorch.utils import get_paddings_indicator
-
+from .involution.rpn_inv import RpnInvolution
+from .involution.psa_inv import PsaInvolution
 
 USING_SCN = False  # default: not use SparseConv
 
@@ -622,7 +623,9 @@ class VoxelNet(nn.Module):
 
         rpn_class_dict = {
             "RPN": RPN,
-            "PSA": PSA
+            "PSA": PSA,
+            "RpnInvolution": RpnInvolution,
+            "PsaInvolution": PsaInvolution,
         }
         self.rpn_class_name = rpn_class_name
         rpn_class = rpn_class_dict[rpn_class_name]
